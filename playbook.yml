@@ -1,0 +1,208 @@
+---
+- name: Hello
+  hosts: all
+  vars:
+    apt_packages:
+      - git
+      - software-properties-common
+      - net-tools
+      - traceroute
+      - coreutils
+      - sqlite3
+      - parallel
+      # - singularity-container
+      # - apptainer
+      - git-annex-standalone
+      - datalad
+      - python3-dev
+      - python3-pip
+      - python3-venv
+      - libsqlite3-dev
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - apt-transport-https
+
+
+  tasks:
+    # installing 3.7 with update-alternatives seems to break neurodeb for some reason?
+    # - name: Install Python 3.7
+    #   ansible.builtin.package:
+    #     name: python3.7
+    #     state: present
+    #   become: yes
+    #
+    # - name: Update alternatives for python
+    #   ansible.builtin.shell:
+    #     cmd: "update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.7 1"
+    #   become: yes
+#
+    - name: Add apptainer
+      ansible.builtin.script: add-apptainer.sh
+      become: yes
+      no_log: yes
+      # no_log: "{{ apptainer is success }}"
+      args:
+        creates: apptainer_1.1.4_amd64.deb
+      register: apptainer
+
+    # Necessary for (at least) git-annex-standalone
+    - name: Add neurodeb
+      ansible.builtin.script: add-neurodeb.sh
+      args:
+        creates: /etc/apt/sources.list.d/neurodebian.sources.list
+
+    - name: install conda
+      ansible.builtin.script: install-conda.sh
+      args:
+        creates: /home/vagrant/miniconda3
+
+    - name: Install Apt Dependencies
+      ansible.builtin.package:
+        name: "{{ item }}"
+        state: present
+      become: yes
+      loop: "{{ apt_packages|flatten(levels=1) }}"
+      retries: 3
+
+
+    # - name: Install condor
+      # sed -e 's,/debian ,/debian-devel ,g' /etc/apt/sources.list.d/neurodebian.sources.list | \
+      #     grep -v data | \
+      #     tee /etc/apt/sources.list.d/neurodebian-devel.sources.list
+      # apt-get update
+      #
+      # debconf-set-selections -v tools/ci/htcondor_dconf_selections
+      # apt-get install -y htcondor
+      #
+      # # Prevent htcondor from bind-mounting a scratch directory over /tmp and
+      # # interfering with our test location. This is necessary as of htcondor v8.7.10
+      # printf "\\nMOUNT_UNDER_SCRATCH = /var/tmp\\n" | \
+      #     tee -a /etc/condor/condor_config
+      #
+      # service condor start
+      #
+      # # Try twice to give condor some time to fire up.
+      # condor_status || (sleep 5; condor_status)
+      # condor_run 'uname -a'  # perform a test submission
+    # #
+    # - name: Pip install pip (For ansible)
+    #   ansible.builtin.pip:
+    #     name: pip
+    #
+    - name: Create Python3-virtual environment folder
+      ansible.builtin.shell:
+        cmd: python3 -m venv repronim-venv
+      args:
+        creates: repronim-venv
+
+    - name: Pip install reproman devel
+      ansible.builtin.pip:
+          name: "/home/vagrant/reproman[devel]"
+          editable: true
+          virtualenv: /home/vagrant/repronim-venv/
+          virtualenv_site_packages: true
+
+    - git_config:
+        name: user.email
+        scope: global
+        value: "reproman@repronim.org"
+
+    - git_config:
+        name: user.name
+        scope: global
+        value: "ReproMan Test"
+
+    # Set defaultBranch to avoid polluting output with repeated
+    # warnings, and set it to something other than "master" to
+    # check that no functionality hard codes the default branch.
+    - git_config:
+        name: init.defaultBranch
+        scope: global
+        value: rman-default-test-branch
+
+    - name: update aptitude
+      apt:
+        name: aptitude
+        state: latest
+        update_cache: true
+      become: yes
+
+    - name: Add Docker GPG apt Key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+      become: yes
+
+    - name: Add Docker Repository
+      apt_repository:
+        repo: deb https://download.docker.com/linux/ubuntu focal stable
+        state: present
+      become: yes
+
+    - name: Update and upgrade apt packages
+      apt:
+        upgrade: yes
+        update_cache: yes
+      become: true
+
+    - name: install docker-ce
+      package:
+        name: docker-ce
+        state: latest
+      become: yes
+
+    - name: add vagrant to docker group
+      ansible.builtin.shell:
+        cmd: usermod -aG docker vagrant
+      become: yes
+
+    - name: Pip install asmacdo extras
+      ansible.builtin.pip:
+          name: "{{ item }}"
+          virtualenv: /home/vagrant/repronim-venv/
+      with_items:
+        - ipdb
+        - rich
+
+    - name: Install requirements for `external versions`
+      ansible.builtin.pip:
+          name: "{{ item }}"
+          virtualenv: /home/vagrant/repronim-venv/
+      with_items:
+        - scipy
+        # - mvpa2 # No matching distribution found for mvpa2 
+        - statsmodels
+        - pandas
+        - matplotlib
+        # - psychopy #  ModuleNotFoundError: No module named 'attrdic
+
+
+
+
+    # - name: Install Docker Module for Python
+    #   pip:
+        # name: docker
+    # - name: install docker repository
+    #   ansible.builtin.script: install-docker.sh
+      # args:
+      #   creates: /etc/apt/keyrings/docker.gpg
+      # register: new_docker_repo
+    #
+    # - name: Install Docker
+    #   ansible.builtin.package:
+    #     name: "{{ item }}"
+    #     state: present
+    #   become: yes
+    #   with_items:
+    #     - docker-ce
+    #     - docker-ce-cli
+    #     - containerd.io
+    #     - docker-compose-plugin
+    #   retries: 3
+    #   when: new_docker_repo.changed
+
+    - debug:
+        msg: "hello"
+
